@@ -1,6 +1,6 @@
 require('dotenv').config();
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const WEBHOOK_URL = `${process.env.WEBHOOK_URL}/webhook/${BOT_TOKEN}`;
+const WEBHOOK_URL = `${process.env.WEBHOOK_URL}/api/webhook`;
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -17,7 +17,7 @@ const bot = new TelegramBot(BOT_TOKEN, { webHook: true });
 const app = express();
 app.use(bodyParser.json());
 
-app.post(`/webhook/${BOT_TOKEN}`, (req, res) => {
+app.post(`/api/webhook`, (req, res) => {
     bot.processUpdate(req.body);
     res.sendStatus(200);
 });
@@ -28,7 +28,7 @@ app.listen(PORT, () => {
 });
 
 // ✅ Set webhook dynamically
-bot.setWebHook(WEBHOOK_URL).then(() => console.log("Webhook set!")).catch(console.error);
+bot.setWebHook(WEBHOOK_URL);
 bot.getWebHookInfo().then(console.log);
 
 
