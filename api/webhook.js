@@ -13,6 +13,20 @@ app.use((err, req, res, next) => {
 });
 
 app.post('/api/webhook', (req, res) => {
+    // Add security headers
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('X-Telegram-Bot-Api-Secret-Token', process.env.BOT_TOKEN);
+    
+    try {
+        bot.processUpdate(req.body);
+        res.status(200).json({status: 'ok'});
+    } catch (err) {
+        console.error('Webhook error:', err);
+        res.status(200).json({status: 'error', message: err.message});
+    }
+});
+
+app.post('/api/webhook', (req, res) => {
     try {
         console.log('Received update:', req.body); // Log incoming updates
         bot.processUpdate(req.body);
