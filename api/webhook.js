@@ -1,17 +1,39 @@
-import { Telegraf } from 'telegraf';
+require('dotenv').config({ path: '../.env' });  // Go up one level to find .env
+const express = require('express');
+const bodyParser = require('body-parser');
+const bot = require('../bot1');
 
-const bot = new Telegraf(process.env.BOT_TOKEN);
+const app = express();
+app.use(bodyParser.json());
 
-export default async function handler(req, res) {
-    if (req.method !== "POST") {
-        return res.status(405).send("Method Not Allowed");
-    }
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Error:', err);
+    res.status(500).send('Server Error');
+});
 
+app.post('/api/webhook', (req, res) => {
     try {
-        bot.handleUpdate(req.body);
-        res.status(200).send("OK");
-    } catch (error) {
-        console.error("Error processing update:", error);
-        res.status(500).send("Internal Server Error");
+        console.log('Received update:', req.body); // Log incoming updates
+        bot.processUpdate(req.body);
+        res.sendStatus(200);
+    } catch (err) {
+        console.error('Webhook error:', err);
+        res.status(500).send('Error processing update');
     }
-}
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    
+    // Set webhook only if all required env vars exist
+    if (process.env.BOT_TOKEN && process.env.WEBHOOK_URL) {
+        const WEBHOOK_URL = `${process.env.WEBHOOK_URL}/api/webhook`;
+        bot.setWebHook(WEBHOOK_URL)
+            .then(() => console.log(`Webhook set to ${WEBHOOK_URL}`))
+            .catch(err => console.error('Error setting webhook:', err));
+    } else {
+        console.warn('Missing required environment variables for webhook setup');
+    }
+});

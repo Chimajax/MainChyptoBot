@@ -1,36 +1,38 @@
 require('dotenv').config();
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const WEBHOOK_URL = `${process.env.WEBHOOK_URL}/api/webhook`;
 const TelegramBot = require('node-telegram-bot-api');
-const express = require('express');
-const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
-const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+const bodyParser = require('body-parser');
 
-admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-});
+// Secure Firebase initialization
+let serviceAccount;
+try {
+    if (!process.env.FIREBASE_KEY) {
+        throw new Error('FIREBASE_KEY environment variable is missing');
+    }
+    
+    // Parse the JSON and handle newlines in private key
+    const firebaseConfig = JSON.parse(process.env.FIREBASE_KEY);
+    firebaseConfig.private_key = firebaseConfig.private_key.replace(/\\n/g, '\n');
+    serviceAccount = firebaseConfig;
+    
+    console.log('Firebase config parsed successfully');
+} catch (error) {
+    console.error('Failed to parse Firebase config:', error.message);
+    process.exit(1);
+}
+
+try {
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+    });
+    console.log('Firebase initialized successfully');
+} catch (error) {
+    console.error('Firebase initialization failed:', error.message);
+    process.exit(1);
+}
 
 const db = admin.firestore();
-
-const bot = new TelegramBot(BOT_TOKEN, { webHook: true }); 
-const app = express();
-app.use(bodyParser.json());
-
-app.post(`/api/webhook`, (req, res) => {
-    bot.processUpdate(req.body);
-    res.sendStatus(200);
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
-
-// ✅ Set webhook dynamically
-bot.setWebHook(WEBHOOK_URL);
-bot.getWebHookInfo().then(console.log);
-
+const bot = new TelegramBot(process.env.BOT_TOKEN, { webHook: true });
 
 function logEvent(event, details) {
     console.log(`[${new Date().toISOString()}] ${event}:`, JSON.stringify(details, null, 2));
@@ -114,8 +116,7 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
 
                 // Notify referrer
                 const referrerChatId = referrerId;
-                    bot.sendMessage(referrerChatId, `🎉 A Sign Up used your referral!.`);
-                
+                bot.sendMessage(referrerChatId, `🎉 A Sign Up used your referral!.`);
             } else {
                 logEvent('Invalid Referrer', { userId, referrerId });
                 await userRef.update({ referredBy: null });
@@ -126,7 +127,7 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
         // Send welcome message with updated balance info
         const balanceMessage = referrerId ? "🎉 You received Points for using a referral!, Check In Game" : "";
         bot.sendMessage(chatId, `${yello}`,
-             {
+            {
                 parse_mode: "Markdown",
                 reply_markup: {
                     inline_keyboard: [
@@ -144,3 +145,6 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
 });
 
 console.log("Bot is running with corrected Firestore updates...");
+
+// Export the bot instance
+module.exports = bot;
