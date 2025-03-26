@@ -6,7 +6,12 @@ const admin = require('firebase-admin');
 let db;
 const initFirebase = () => {
   try {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+   
+    const firebaseConfig = JSON.parse(
+  Buffer.from(process.env.FIREBASE_CONFIG_BASE64, 'base64').toString('utf-8')
+);
+
+    const serviceAccount = firebaseConfig;
     
     admin.initializeApp({
       credential: admin.credential.cert({
