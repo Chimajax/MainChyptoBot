@@ -6,17 +6,44 @@ const admin = require('firebase-admin');
 let db;
 const initFirebase = () => {
   try {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_KEY.replace(/\\n/g, '\n'));
+    // First validate the key exists
+    if (!process.env.FIREBASE_KEY) {
+      throw new Error('FIREBASE_KEY environment variable is missing');
+    }
+
+    // Clean and parse the key
+    const firebaseConfig = JSON.parse(
+      process.env.FIREBASE_KEY
+        .replace(/\\n/g, '\n')          // Unescape newlines
+        .replace(/\r?\n|\r/g, '')       // Remove any actual newlines
+        .replace(/\u2028|\u2029/g, '')  // Remove line/paragraph separators
+    );
+
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-      databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
+      credential: admin.credential.cert(firebaseConfig),
+      databaseURL: `https://${firebaseConfig.project_id}.firebaseio.com`
     });
+
     db = admin.firestore();
     db.settings({ ignoreUndefinedProperties: true });
-    console.log('🔥 Firebase connected');
+    console.log('✅ Firebase connected successfully');
   } catch (err) {
-    console.error('Firebase init error:', err);
-    setTimeout(initFirebase, 5000); // Retry every 5s
+    console.error('Firebase initialization failed:', {
+      error: err.message,
+      keyPreview: process.env.FIREBASE_KEY?.substring(0, 100) + '...'
+    });
+
+    // For JSON errors, show the exact position
+    if (err instanceof SyntaxError && err.message.includes('JSON')) {
+      const position = parseInt(err.message.match(/position (\d+)/)?.[1] || 0);
+      console.error('JSON Error at position', position, ':', 
+        process.env.FIREBASE_KEY?.substring(position - 10, position + 10));
+    }
+
+    // Retry only for network errors
+    if (err.message.includes('network')) {
+      setTimeout(initFirebase, 10000);
+    }
   }
 };
 initFirebase();
