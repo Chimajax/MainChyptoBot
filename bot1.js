@@ -146,5 +146,8 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
 
 console.log("Bot is running with corrected Firestore updates...");
 
-// Export the bot instance
-module.exports = bot;
+// Add this at the BOTTOM of bot1.js
+module.exports = {
+  bot,    // The TelegramBot instance
+  db      // Firebase instance (optional if needed elsewhere)
+};
