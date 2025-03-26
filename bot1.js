@@ -6,44 +6,24 @@ const admin = require('firebase-admin');
 let db;
 const initFirebase = () => {
   try {
-    // First validate the key exists
-    if (!process.env.FIREBASE_KEY) {
-      throw new Error('FIREBASE_KEY environment variable is missing');
-    }
-
-    // Clean and parse the key
-    const firebaseConfig = JSON.parse(
-      process.env.FIREBASE_KEY
-        .replace(/\\n/g, '\n')          // Unescape newlines
-        .replace(/\r?\n|\r/g, '')       // Remove any actual newlines
-        .replace(/\u2028|\u2029/g, '')  // Remove line/paragraph separators
-    );
-
+    const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+    
     admin.initializeApp({
-      credential: admin.credential.cert(firebaseConfig),
-      databaseURL: `https://${firebaseConfig.project_id}.firebaseio.com`
+      credential: admin.credential.cert({
+        ...serviceAccount,
+        private_key: serviceAccount.private_key.replace(/\\\\n/g, '\n')
+      }),
+      databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
     });
 
     db = admin.firestore();
-    db.settings({ ignoreUndefinedProperties: true });
-    console.log('✅ Firebase connected successfully');
+    console.log('🔥 Firebase successfully connected');
   } catch (err) {
-    console.error('Firebase initialization failed:', {
+    console.error('Firebase init failed:', {
       error: err.message,
-      keyPreview: process.env.FIREBASE_KEY?.substring(0, 100) + '...'
+      keySnippet: process.env.FIREBASE_KEY?.substring(0, 50) + '...'
     });
-
-    // For JSON errors, show the exact position
-    if (err instanceof SyntaxError && err.message.includes('JSON')) {
-      const position = parseInt(err.message.match(/position (\d+)/)?.[1] || 0);
-      console.error('JSON Error at position', position, ':', 
-        process.env.FIREBASE_KEY?.substring(position - 10, position + 10));
-    }
-
-    // Retry only for network errors
-    if (err.message.includes('network')) {
-      setTimeout(initFirebase, 10000);
-    }
+    process.exit(1);
   }
 };
 initFirebase();
