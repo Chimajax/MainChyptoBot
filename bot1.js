@@ -1,38 +1,37 @@
-require('dotenv').config();
-const TelegramBot = require('node-telegram-bot-api');
+require('dotenv').config({ path: '../.env' });
+const { Telegraf } = require('telegraf');
 const admin = require('firebase-admin');
-const bodyParser = require('body-parser');
 
-// Secure Firebase initialization
-let serviceAccount;
-try {
-    if (!process.env.FIREBASE_KEY) {
-        throw new Error('FIREBASE_KEY environment variable is missing');
-    }
-    
-    // Parse the JSON and handle newlines in private key
-    const firebaseConfig = JSON.parse(process.env.FIREBASE_KEY);
-    firebaseConfig.private_key = firebaseConfig.private_key.replace(/\\n/g, '\n');
-    serviceAccount = firebaseConfig;
-    
-    console.log('Firebase config parsed successfully');
-} catch (error) {
-    console.error('Failed to parse Firebase config:', error.message);
-    process.exit(1);
-}
-
-try {
+// Firebase with automatic reconnection
+let db;
+const initFirebase = () => {
+  try {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_KEY.replace(/\\n/g, '\n'));
     admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
+      credential: admin.credential.cert(serviceAccount),
+      databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
     });
-    console.log('Firebase initialized successfully');
-} catch (error) {
-    console.error('Firebase initialization failed:', error.message);
-    process.exit(1);
-}
+    db = admin.firestore();
+    db.settings({ ignoreUndefinedProperties: true });
+    console.log('🔥 Firebase connected');
+  } catch (err) {
+    console.error('Firebase init error:', err);
+    setTimeout(initFirebase, 5000); // Retry every 5s
+  }
+};
+initFirebase();
 
-const db = admin.firestore();
-const bot = new TelegramBot(process.env.BOT_TOKEN, { webHook: true });
+const bot = new Telegraf(process.env.BOT_TOKEN);
+
+// Connection health check
+setInterval(async () => {
+  try {
+    await db.collection('heartbeat').doc('check').set({ timestamp: new Date() });
+  } catch (err) {
+    console.warn('Firebase connection lost - reinitializing');
+    initFirebase();
+  }
+}, 30000); // Check every 30s
 
 function logEvent(event, details) {
     console.log(`[${new Date().toISOString()}] ${event}:`, JSON.stringify(details, null, 2));
@@ -41,46 +40,45 @@ function logEvent(event, details) {
 const referReward = 10000;
 const referrerReward = 40000;
 
-bot.onText(/\/start(.*)/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id.toString();
-    let referrerId = null;
-    const yello = `🚀 *Get Ahead, Start Earning!*\n\nChypto connects you with rewarding tasks—don’t miss out! Follow us on Twitter and be the first to grab new earning opportunities!\n\n🎮 *Complete Tasks, Earn Rewards!*\n\nJoin Chypto and turn simple tasks into real rewards, new tasks and earning opportunities!\n\nClick CHYPTO To Start\n\nYour Referral link is [https://t.me/Chypto_Official_Bot?start=ref_${userId}](https://t.me/Chypto_Official_Bot?start=ref_${userId}`;
+bot.start(async (ctx) => {
+    const userId = ctx.from.id.toString();
+    const chatId = ctx.chat.id;
+    const startPayload = ctx.payload; // For /start ref_123
+    const yello = `🚀 *Get Ahead, Start Earning!*\n\nChypto connects you with rewarding tasks—don't miss out! Follow us on Twitter and be the first to grab new earning opportunities!\n\n🎮 *Complete Tasks, Earn Rewards!*\n\nJoin Chypto and turn simple tasks into real rewards, new tasks and earning opportunities!\n\nClick CHYPTO To Start\n\nYour Referral link is [https://t.me/Chypto_Official_Bot?start=ref_${userId}](https://t.me/Chypto_Official_Bot?start=ref_${userId}`;
 
-    bot.sendMessage(chatId, "😁 Please wait");
+    await ctx.reply("😁 Please wait");
 
-    const startPayload = match[1] ? match[1].trim() : "";
     if (!startPayload) {
         // No referral link, just send welcome message
-        return bot.sendMessage(chatId, 
-            `${yello}`, 
-            {
-                parse_mode: "Markdown",
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: "🔥 Follow Us", url: "https://x.com/@Chypto_Official" }],
-                        [{ text: "🚀 Join Channel", url: "https://t.me/chyptochannel" }]
-                    ]
-                }
-            });
+        return ctx.replyWithMarkdown(yello, {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "🔥 Follow Us", url: "https://x.com/@Chypto_Official" }],
+                    [{ text: "🚀 Join Channel", url: "https://t.me/chyptochannel" }]
+                ]
+            }
+        });
     }
 
     // Process referral link if present
     logEvent('Referral Link Received', { userId, payload: startPayload });
     const refMatch = startPayload.match(/^ref_(\d+)$/);
-    if (refMatch) {
-        referrerId = refMatch[1];
+    const referrerId = refMatch ? refMatch[1] : null;
+    
+    if (referrerId) {
         logEvent('Valid Referral Detected', { userId, referrerId });
     }
 
     try {
+        if (!db) throw new Error('Database not connected');
+        
         const userRef = db.collection("users").doc(userId);
         const userDoc = await userRef.get();
 
         // Check for existing referral relationship first
         if (userDoc.exists && userDoc.data().referredBy) {
             logEvent('Duplicate Referral Attempt', { userId });
-            return bot.sendMessage(chatId, "⚠️ You Have Been Referred Already!");
+            return ctx.reply("⚠️ You Have Been Referred Already!");
         }
 
         // Handle user document creation/update
@@ -115,39 +113,31 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
                 logEvent('Referrer Rewarded', { referrerId, amount: referrerReward });
 
                 // Notify referrer
-                const referrerChatId = referrerId;
-                bot.sendMessage(referrerChatId, `🎉 A Sign Up used your referral!.`);
+                await bot.telegram.sendMessage(referrerId, `🎉 A Sign Up used your referral!`);
             } else {
                 logEvent('Invalid Referrer', { userId, referrerId });
                 await userRef.update({ referredBy: null });
-                bot.sendMessage(chatId, "⚠️ Invalid referral link - referrer not found");
+                await ctx.reply("⚠️ Invalid referral link - referrer not found");
             }
         }
 
-        // Send welcome message with updated balance info
-        const balanceMessage = referrerId ? "🎉 You received Points for using a referral!, Check In Game" : "";
-        bot.sendMessage(chatId, `${yello}`,
-            {
-                parse_mode: "Markdown",
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: "🔥 Follow Us", url: "https://x.com/@Chypto_Official" }],
-                        [{ text: "🚀 Join Channel", url: "https://t.me/chyptochannel" }]
-                    ]
-                }
-            });
+        // Send welcome message
+        await ctx.replyWithMarkdown(yello, {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "🔥 Follow Us", url: "https://x.com/@Chypto_Official" }],
+                    [{ text: "🚀 Join Channel", url: "https://t.me/chyptochannel" }]
+                ]
+            }
+        });
 
     } catch (error) {
         logEvent('System Error', { userId, error: error.message });
         console.error("Error:", error);
-        bot.sendMessage(chatId, "⚠️ An error occurred. Please try again.");
+        await ctx.reply("⚠️ An error occurred. Please try again.");
     }
 });
 
 console.log("Bot is running with corrected Firestore updates...");
 
-// Add this at the BOTTOM of bot1.js
-module.exports = {
-  bot,    // The TelegramBot instance
-  db      // Firebase instance (optional if needed elsewhere)
-};
+module.exports = bot;
